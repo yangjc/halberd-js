@@ -6,7 +6,7 @@ A Javascript Module Loader which is compatible with AMD and CMD Specification.
 More
 ----
 
-[Halberd-JS 入门 (Start Guide)](https://github.com/yangjc/halberd-js/wiki/Halberd-JS-%E5%85%A5%E9%97%A8)
+[入门 (Start Guide)](issues/1)
 
 _Editing..._
 
