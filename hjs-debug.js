@@ -1,5 +1,5 @@
 /*
- * Halberd-JS Loader for Client-Side JavaScript v2.3.5
+ * Halberd-JS Loader for Client-Side JavaScript v2.3.10
  * A Javascript Module Loader which is compatible with AMD and CMD Specification
  * YJC <yangjiecong@4399.com> | MIT license | 2013-09
  */
@@ -41,12 +41,42 @@ hjs.main(main [, deps] [, config]);
   /*
    * 判断浏览器可使用哪种 script 回调事件
    */
-  var script = D.createElement('script'), i,
+  var script = D.createElement('script'), scripts, i,
   // script 优先使用 onload 事件执行回调
   // Firefox 早期版本中，动态创建 script 的初始对象不包含 onload 属性，但 onload 事件可用
   // 64位系统的 IE9 onload 的执行顺序无法保证，对于 IE 系浏览器，仅 IE10+ 使用 onload
     script_use_onload = !('onreadystatechange' in script) ||
-      (('onload' in script) && ( ! D.documentMode || D.documentMode >= 10));
+      (('onload' in script) && ( ! D.documentMode || D.documentMode >= 10)),
+
+  // @https://github.com/seajs/seajs
+  // For IE6-9 browsers, the script onload event may not fire right
+  // after the script is evaluated. Kris Zyp found that it
+  // could query the script nodes and the one that is in "interactive"
+  // mode indicates the current script
+  // ref: http://goo.gl/JHfFW
+    current_script, interactive_script;
+
+  /**
+   * IE下，异步加载的js文件执行时，获取引入当前js文件的script节点
+   */
+  function get_interactive_script() {
+    if (current_script) {
+      return current_script;
+    }
+    if (interactive_script && interactive_script.readyState === 'interactive') {
+      return interactive_script;
+    }
+
+    var script, scripts = D.getElementsByTagName('script');
+
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      script = scripts[i];
+      if (script.readyState === 'interactive') {
+        interactive_script = script;
+        return interactive_script;
+      }
+    }
+  }
 
   /*
    * 获取引入 halberd-js 核心文件的 script 节点
@@ -56,7 +86,7 @@ hjs.main(main [, deps] [, config]);
   if ( ! script) {
     // 通常，如果通过阻塞方式载入 js，则当前执行的 js 由页面上最后一个 script 节点引入
     // 但部分浏览器插件会改变这个特征（如安装了 evernote 插件的 IE6），因此向前遍历 script 节点
-    var scripts = D.getElementsByTagName('script');
+    scripts = D.getElementsByTagName('script');
     for (i = scripts.length - 1; i >= 0; i--) {
       if (scripts[i].getAttribute('data-main')) {
         script = scripts[i];
@@ -79,33 +109,32 @@ hjs.main(main [, deps] [, config]);
           script.setAttribute('data-' + name, value)))
   }
 
-  // 为扩展功能预留的事件实例
-  var events;
-
-  // todo:触发事件的函数
-  /**
-   * 触发事件
-   */
-//  function events_emit(){
-//    return events && events.emit.apply(this, arguments)
-//  }
-
   /*
    * 模块内部 module 对象类
    */
-  function Module_object(id, uri){
-    this.id = id;
+  function Module_object(uri){
     this.uri = uri;
     this.exports = {};
   }
 
-  /*
-   * 工具函数
-   */
+  // 工具函数
   var util = Module_object.prototype = {},
-    module_object = new Module_object(1, 1);
 
-  util._util = util;
+  // 用于依赖分析时避免重复载入 util 函数模块
+    module_object = new Module_object(1),
+
+  // 为扩展功能预留的事件实例
+    events;
+
+  // todo:触发事件的函数
+    /**
+     * 触发事件
+     */
+//  function events_emit(){
+//    return events && events.emit.apply(this, arguments)
+//  }
+
+  util._ = util; // 原始对象作为私有属性暴露
 
   // util function - trim
   var reg_trim_l = /^[\s\0]+/, reg_trim_r = /[\s\0]+$/;
@@ -213,36 +242,6 @@ hjs.main(main [, deps] [, config]);
     }
   }
 
-  // @https://github.com/seajs/seajs
-  // For IE6-9 browsers, the script onload event may not fire right
-  // after the script is evaluated. Kris Zyp found that it
-  // could query the script nodes and the one that is in "interactive"
-  // mode indicates the current script
-  // ref: http://goo.gl/JHfFW
-  var current_script, interactive_script;
-
-  /**
-   * IE下，异步加载的js文件执行时，获取引入当前js文件的script节点
-   */
-  function get_interactive_script() {
-    if (current_script) {
-      return current_script;
-    }
-    if (interactive_script && interactive_script.readyState === 'interactive') {
-      return interactive_script;
-    }
-
-    var script, scripts = D.getElementsByTagName('script');
-
-    for (var i = scripts.length - 1; i >= 0; i--) {
-      script = scripts[i];
-      if (script.readyState === 'interactive') {
-        interactive_script = script;
-        return interactive_script;
-      }
-    }
-  }
-
   /*
    * 模块加载逻辑
    */
@@ -251,16 +250,27 @@ hjs.main(main [, deps] [, config]);
 
     config_paths = {}, // 模块路径集合
     config_alias = {}, // 模块标识映射
+    config_merge = {}, // 合并模块声明
     core_config = { // 默认配置
       charset: 'utf-8', // 默认字符集
-      version_mark: 'hjs', // 版本号参数名
+      version_mark: 'v', // 版本号标记
       debug: -1 // 是否开启调试模式 0:线上环境 1:预发布环境 2:开发环境 -1:准线上环境
     },
+
+    // 当前页面基准路径
+    // 优先取 BASE 节点指定的路径
+    page_base = W.location.href,
+    page_root,
+    top_base,
+
+    reg_q_end = /\?$/, // 忽略模块标识末尾的问号
 
     // head 节点
     head = D.getElementsByTagName("head")[0] || D.documentElement,
     // base 节点
     base_ele = head.getElementsByTagName("base")[0],
+
+    page_module,
 
     file_meta = {}, // js 文件元数据缓存
     module_meta = {}, // 模块文件元数据缓存
@@ -306,13 +316,13 @@ hjs.main(main [, deps] [, config]);
       script.charset = _this._charset;
       script.async = true;
 
-      // debug=2 无视所有版本号设置，全部文件刷新浏览器缓存，通过模块源码分析依赖关系
-      // debug=1 有设置版本号的按版本号加载，无版本号设置则刷新浏览器文件缓存，通过模块源码分析依赖关系
-      // debug=0 全部按版本号加载，无版本号设置的不加版本号，不通过模块源码分析依赖关系
-      // debug=-1 版本号处理同 debug=0，通过模块源码分析依赖关系
+      // `debug === -1` 默认值，全部按版本号加载，无版本号设置的不加版本号；分析模块源码里的依赖关系。
+      // `debug === 2`  无视所有版本号设置，全部文件以当前时间戳为版本号；分析模块源码里的依赖关系。
+      // `debug === 1`  有设置版本号的按版本号加载，无版本号设置则以当前时间戳为版本号；分析模块源码里的依赖关系。
+      // `debug === 0`  版本号处理同 `debug === -1` ；**不**分析模块源码里的依赖关系。
       var version = core_config.debug > 1 ? init_time : _this._version || (core_config.debug > 0 ? init_time : '');
       script.src = _this._src +
-        (version ? (_this._src.indexOf('?') === -1 ? '?' : '&') + core_config.version_mark + '=' + version : '');
+        (version ? (_this._src.indexOf('?') === -1 ? '?' : '&') + core_config.version_mark + version : '');
 
       current_script = script;
 
@@ -336,7 +346,7 @@ hjs.main(main [, deps] [, config]);
 
       if (loading_meta) {
         foreach(loading_meta, function(meta){
-          hjs_module.set_module(meta[0], _this._src, meta[1], meta[2])
+          _this.anonymous_module().set_module(meta[0], _this._src, meta[1], meta[2])
         });
         loading_meta = undefined;
       }
@@ -367,6 +377,10 @@ hjs.main(main [, deps] [, config]);
           _this.file_loading()
         }
       }
+    },
+    // ID与文件实际路径相同的匿名模块
+    anonymous_module: function(){
+      return this._anonymous_module || (this._anonymous_module = new Module(this._src))
     },
     // js 文件加载中
     file_loading: function(){
@@ -410,13 +424,16 @@ hjs.main(main [, deps] [, config]);
 
       if (_this._modules) {
         if (_this._modules.length === 1) {
-          _this._exports = _this._modules[0].module_exports()
+          _this._exports = _this._modules[0]/*CONTEXT*/.module_exports()
         } else {
-          var e = {};
-          foreach(_this._modules, function(each_module){
-            e[each_module._define_id] = each_module.module_exports()
-          });
-          _this._exports = e;
+//          var e = [];
+//          foreach(_this._modules, function(each_module){
+//            e.push(each_module.module_exports())
+//          });
+//          _this._exports = e
+          _this._exports = function(id){
+            return _this._anonymous_module.get_module(id)
+          }
         }
         return _this._exports;
       } else {
@@ -448,7 +465,7 @@ hjs.main(main [, deps] [, config]);
    * 封装模块
    * define() (factory) (id, factory) (deps, factory) (id, deps, factory)
    * @param {String} id
-   * @param {String|Array} deps
+   * @param {Array} deps
    * @param {Function|*} factory
    */
   function define(id, deps, factory){
@@ -476,37 +493,38 @@ hjs.main(main [, deps] [, config]);
         return define;
     }
 
-    !deps && core_config.debug && typeof factory === 'function' &&
-      (deps = parse_deps(factory.toString()));
+    var script, src,
+      _deps = core_config.debug && typeof factory === 'function' && parse_deps(factory.toString());
 
-    if (script_use_onload) {
-      (loading_meta || (loading_meta = [])).push([id, deps, factory])
-    } else {
-      var script = get_interactive_script();
-      script &&
-        hjs_module.set_module(id, script.getAttribute(fid_attr), deps, factory)
-    }
+    _deps && (deps = deps ? deps.concat(_deps) : _deps);
 
-    return define;
+    script_use_onload ?
+
+      (loading_meta || (loading_meta = [])).push([id, deps, factory]) :
+
+      (script = get_interactive_script()) &&
+        file_meta[src = script.getAttribute(fid_attr)].anonymous_module()
+          /*CONTEXT*/.set_module(id, src, deps, factory);
+
+    return define
   }
 
   /*
    * 模块类
    */
-  function Module(id, factory, define_id){
+  function Module(id, factory){
     this._id = id;
-    this._define_id = define_id;
-    this._factory = factory;
+    this._factory = factory
   }
 
-  // 当前页面基准路径
-  // 优先取 BASE 节点指定的路径
-  var page_base = W.location.href;
   base_ele && base_ele.href && (page_base = absolute_url(base_ele.href, page_base));
+
+  // 当前页面根路径
+  page_root = reg_root.exec(page_base)[0];
   
   // 顶级标识基准路径
   // 取加载器所在目录 或 当前页面基准目录
-  var top_base = (
+  top_base = (
       script && script.src ?
         absolute_url(script.src, page_base) :
         page_base
@@ -516,8 +534,6 @@ hjs.main(main [, deps] [, config]);
   function alias_id(id){
     return config_alias[ id ] || id;
   }
-
-  var reg_q_end = /\?$/; // 忽略模块标识末尾的问号
 
   Module.prototype = {
     // 由模块标识获取绝对路径
@@ -535,22 +551,22 @@ hjs.main(main [, deps] [, config]);
       if (id.indexOf('://') > 0) {
         return alias_id(id);
       }
-      
-      id = alias_id(id);
 
       c = id.charAt(0);
+
       // 相对路径
-      if (c === '.' || c === '?' || c === '') {
+      if (c === '.') {
         return alias_id(absolute_url(id, this._id));
       }
 
-      // 顶级标识
+      // 根路径
       if (c === '/') {
-        return alias_id(absolute_url(top_base + id));
+        return alias_id(page_root + id);
       }
 
       var base;
 
+      // 顶级标识
       (i = id.indexOf('/')) > -1 && // 尝试与项目路径拼接
         (base = config_paths[ id.substring(0, i) ]) &&
           (id = id.substring(i + 1)); // 存在项目路径配置时替换第一段路径
@@ -559,37 +575,32 @@ hjs.main(main [, deps] [, config]);
     },
     // 获取依赖的 js 文件对象
     get_deps: function(deps){
-      var l, f;
+      var l, f, id;
       if (is_array(deps) && (l = deps.length)) {
         for (var i = 0, _d = []; i < l; i++) {
-          f = this.get_file(deps[i]);
-          // 避免自己依赖自己
-          f._src !== this._id && _d.push(f);
+          if (id = deps[i]) {
+            f = this.get_file(id);
+            // 避免自己依赖自己
+            f._src !== this._id && _d.push(f);
+          }
         }
         return _d
       }
     },
     // 获取 js 文件缓存
     get_file: function(id, version, deps, charset){
-      if (typeof id === 'object' && id) {
-        version = id.version;
-        charset = id.charset;
-        deps = id.deps;
-        id = id.id;
-      }
-
       var src = this.get_id(id), meta;
 
       // 模块标识以 ? 结尾则刷新浏览器文件缓存
       reg_q_end.test(id) && (version = init_time);
 
-      if (file_meta[src]) {
-        meta = file_meta[src];
-        if ( ! meta.ready && ! meta.loading) {
+      // 如果被声明属于合并模块，则强制重定向到合并模块的路径
+      if (meta = file_meta[src = config_merge[src] || src]) {
+        if ( ! meta._ready && ! meta._loading) {
           // 如果 js 文件还没开始加载，可修改配置
           deps && (meta._deps = this.get_deps(deps));
-          version && (meta.version = version);
-          charset && (meta.charset = charset);
+          version && (meta._version = version);
+          charset && (meta._charset = charset);
         }
         return meta
       }
@@ -608,19 +619,19 @@ hjs.main(main [, deps] [, config]);
     },
     // 获取模块接口，模块的初始化在且只在此时进行
     module_exports: function(){
-      var _this = this;
-      if (_this._module) {
-        return _this._module.exports;
+      var _this = this, _m, _f;
+      if (_m = _this._module) {
+        return _m.exports;
       }
 
-      if (typeof _this._factory === 'function') {
-        _this._module = new Module_object(_this._define_id, _this._id);
-        _this._factory(_this.new_require(), _this._module.exports, _this._module);
+      if (typeof (_f = _this._factory) === 'function') {
+        _m = _this._module = new Module_object(_this._id);
+        _f(_this.new_require(), _m.exports, _m);
       } else {
-        _this._module = { exports : _this._factory };
+        _m = _this._module = { exports : _f };
       }
       delete _this._factory;
-      return _this._module.exports
+      return _m.exports
     },
     // 返回一个新的 require 实例
     new_require: function(){
@@ -630,28 +641,44 @@ hjs.main(main [, deps] [, config]);
       require.async = function(id, callback, deps){
         _this.async_module(id, callback, deps)
       };
+      require.clear = function(id){
+        _this.clear_file(id)
+      };
+      require.config = function(config, callback){
+        _this.set_config(config, callback)
+      };
       // 兼容CMD规范
       require.resolve = function(id){
         return _this.get_id(id)
       };
-      return require;
+      return require
+    },
+    // 清除文件缓存
+    clear_file: function(id){
+      delete file_meta[id = this.get_id(id)];
+      delete config_merge[id]
     },
     // 保存模块实例缓存
-    set_module: function(define_id, id, deps, factory){
-      if ( ! module_meta[ define_id ? id = this.get_id(define_id) : id ]) {
+    set_module: function(id, src, deps, factory){
+      var file = file_meta[src], m_meta, f_meta;
 
-        var file = file_meta[id];
+      id = id ? this.get_id(id) : src;
 
-        (file._modules || (file._modules = []))
-          .push(module_meta[id] = new Module(id, factory, define_id));
+      (file._modules || (file._modules = []))
+        .push(m_meta = module_meta[id] = new Module(id, factory));
 
-        (deps = module_meta[id].get_deps(deps)) &&
-          (file._define_deps = file._define_deps ? file._define_deps.concat(deps) : deps)
+      if ( ! file_meta[id]) {
+        f_meta = file_meta[id] = new File(id);
+        f_meta._ready = 1;
+        f_meta._modules = [ m_meta ];
       }
+
+      (deps = module_meta[id].get_deps(deps)) &&
+        (file._define_deps = file._define_deps ? file._define_deps.concat(deps) : deps)
     },
     // 异步加载模块
     async_module: function(id, callback, deps){
-      var _this = this;
+      var _this = this, length, modules, file;
 
       if (deps) {
         _this.async_module(deps, function(){
@@ -661,84 +688,87 @@ hjs.main(main [, deps] [, config]);
       } else {
         typeof id === 'string' && (id = trim(id).split(/\s+/));
 
-        var length = id.length;
+        length = id.length;
 
-        if (length === 1) {
-          // 加载一个文件
-          var file = _this.get_file(id[0]);
-          file.load(function(){
-            var e = file.file_exports();
-            typeof callback === 'function' && callback(e)
-          })
-        } else {
-          // 加载多个文件
-          var modules = [];
-          foreach(id, function(id){
-            var file = _this.get_file(id);
-            modules.push(file);
+        modules = [];
 
-            file.load(function(){
-              length --;
-              if (length === 0) {
-                foreach(modules, function(m, i){
-                  modules[i] = modules[i].file_exports()
-                });
-                typeof callback === 'function' && callback.apply(this, modules)
-              }
-            })
-          });
+        function onload(){
+          if (--length === 0) {
+            foreach(modules, function(_id, i){
+              modules[i] = _id ? file_meta[ _this.get_id(_id) ].file_exports() : undefined
+            });
+            callback && callback.apply(this, modules)
+          }
         }
+
+        foreach(id, function(_id){
+          modules.push(_id);
+          _id ?
+            _this.get_file(_id).load(onload) :
+            onload()
+        });
+      }
+    },
+    // 设定配置
+    set_config: function(config, callback){
+      var i, j, item, reg_path_end = /\/*$/, _this = this;
+
+      if (typeof config === 'string') {
+        _this.async_module(config = _this.get_id(config), function(e){
+          module_meta[config].set_config(e, callback)
+        })
+      } else {
+        // 模块路径
+        if (item = config.paths) {
+          for (i in item) {
+            // 自动补全结尾的 /
+            config_paths[i] = _this.get_id(item[i].replace(reg_path_end, '/'))
+          }
+        }
+
+        // 模块标识别名
+        if (item = config.alias) {
+          for (i in item) {
+            j = _this.get_id(item[i]);
+            i = _this.get_id(i);
+            // 避免别名指向相同路径
+            i !== j && (config_alias[i] = j)
+          }
+        }
+
+        // 声明合并模块
+        if (item = config.merge) {
+          for (i in item) {
+            j = _this.get_id(i);
+            foreach(item[i], function(m){
+              config_merge[_this.get_id(m)] = j
+            })
+          }
+        }
+
+        // 版本号、依赖和字符编码，针对js文件而不是针对模块
+        if (item = config.modules) {
+          for (i in item) {
+            // {String} id : [ {String} version, {Array} deps, {String} charset ]
+            _this.get_file(i, item[i][0], item[i][1], item[i][2])
+          }
+        }
+
+        // 其他配置项
+        for (i in config) {
+          core_config[i] = config[i]
+        }
+
+        // 配置设定后立刻执行的函数
+        config.autorun && config.autorun();
+
+        // 执行回调
+        callback && callback(core_config)
       }
     }
   };
 
-  var hjs_module = new Module(top_base); // 加载器模块
-
-  /*
-   * 读取配置
-   */
-  function config(name){
-    return name === undefined ? core_config : core_config[name]
-  }
-
-  /**
-   * 设定配置
-   */
-  config.set = function(config){
-    var i, autorun, reg_path_end = /\/*$/;
-    // 模块路径
-    if (config.paths) {
-      for (i in config.paths) {
-        // 自动补全结尾的 /
-        config_paths[i] = absolute_url(config.paths[i], page_base).replace(reg_path_end, '/');
-      }
-    }
-    delete config.paths;
-    // 版本号、依赖和字符编码，针对js文件而不是针对模块
-    if (config.modules) {
-      for (i in config.modules) {
-        // {String} id : [ {String} version, {Array} deps, {String} charset ]
-        hjs_module.get_file(i, config.modules[i][0], config.modules[i][1], config.modules[i][2]);
-      }
-    }
-    delete config.modules;
-    // 模块标识别名
-    if (config.alias) {
-      for (i in config.alias) {
-        config_alias[i] = config.alias[i];
-      }
-    }
-    delete config.alias;
-    // 配置设定后立刻执行的函数
-    typeof config.autorun === 'function' && (autorun = config.autorun);
-    delete config.autorun;
-    // 避免 set 函数被覆盖
-    delete config.set;
-    for (i in config) {
-      core_config[i] = config[i];
-    }
-    autorun && autorun();
-  };
+  page_module = new Module(page_base); // 以当前页面路径为基准路径的模块
 
   /*
    * 加载主体模块
@@ -747,24 +777,19 @@ hjs.main(main [, deps] [, config]);
     if (_m) {
       if (_d && typeof _d === 'object' && ! is_array(_d)) {
         _c = _d;
-        _d = '';
+        _d = 0
       }
 
       if (_c) {
-        if (typeof _c === 'object') {
-          config.set(_c);
-          main(_m, _d);
-        } else {
-          hjs_module.async_module(_c, function(c){
-            main(_m, _d, c);
-          });
-        }
+        page_module.set_config(_c, function(){
+          main(_m, _d)
+        })
       } else {
         var _main = typeof _m === 'function' ?
           function(){ main_inline(_m) } :
-          function(){ hjs_module.async_module(_m) };
+          function(){ page_module.async_module(_m) };
 
-        _d ? hjs_module.async_module(_d, _main) : _main();
+        _d ? page_module.async_module(_d, _main) : _main()
       }
     }
   }
@@ -779,17 +804,20 @@ hjs.main(main [, deps] [, config]);
 
     deps.length ?
       main_module.async_module(deps, function(){ main_module.get_module(id) }) :
-      main_module.get_module(id);
+      main_module.get_module(id)
   }
 
   /*
    * 默认全局变量 : hjs, define
    */
   W.hjs = define.hjs = {
-    require: hjs_module.new_require(), // 加载模块
-    config: config, // 配置
+    require: page_module.new_require(), // 加载模块
     main: main, // 执行主体模块
-    core_script: core_script, // 含 data-main 的 script 节点相关操作
+    core_script: core_script, // 引入加载器的 script 节点相关操作
+    // 读取全局配置
+    config: function(name){
+      return name === undefined ? core_config : core_config[name]
+    },
     // 预留的扩展功能接口
     ext: {
       // todo:暴露一些外部插件可能需要的接口
