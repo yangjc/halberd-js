@@ -2,7 +2,7 @@
  * Halberd-JS Loader for Client-Side JavaScript v2.3.10
  * A Javascript Module Loader which is compatible with AMD and CMD Specification
  * Repository : https://github.com/yangjc/halberd-js
- * YJC <yangjiecong@live.com> | MIT license | 2013-09
+ * YJC <yangjiecong@live.com> | MIT license | 2013-09 .. 2013-12
  */
 
 /** 引用方式
