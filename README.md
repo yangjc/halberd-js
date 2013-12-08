@@ -8,7 +8,15 @@ More
 
 [入门 (Start Guide)](https://github.com/yangjc/halberd-js/issues/1)
 
-_Editing..._
+[使用指南 (Manual)](https://github.com/yangjc/halberd-js/issues/2)
+
+[模块标识 (Module Identification)](https://github.com/yangjc/halberd-js/issues/3)
+
+[配置文件 (Configurable items)](https://github.com/yangjc/halberd-js/issues/4)
+
+[程序结构 (Program Structure)](https://github.com/yangjc/halberd-js/issues/5)
+
+[现代WEB前端开发的基石 (Cornerstone of Modern Front-End Web Developer)](https://github.com/yangjc/halberd-js/issues/6)
 
 License
 -------
