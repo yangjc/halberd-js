@@ -18,6 +18,10 @@ More
 
 [现代WEB前端开发的基石 (Cornerstone of Modern Front-End Web Developer)](https://github.com/yangjc/halberd-js/issues/6)
 
+For
+---
+Chrome 3+ ; Firefox 2+ ; Safari 3.2+ ; Opera 10+ ; IE 6+ .
+
 License
 -------
 
