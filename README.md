@@ -16,7 +16,7 @@ More
 
 [程序结构 (Program Structure)](https://github.com/yangjc/halberd-js/issues/5)
 
-[现代WEB前端开发的基石 (Cornerstone of Modern Front-End Web Developer)](https://github.com/yangjc/halberd-js/issues/6)
+[现代WEB前端开发的基石 (Cornerstone of Modern Front-End Web Development)](https://github.com/yangjc/halberd-js/issues/6)
 
 For
 ---
