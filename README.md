@@ -1,10 +1,12 @@
-Halberd-JS
-==========
+# DEPRECATED
+
+You should use seaJS/RequireJS.
+
+## Halberd-JS
 
 A Javascript Module Loader which is compatible with AMD and CMD Specification.
 
-More
-----
+#### More
 
 [入门 (Start Guide)](https://github.com/yangjc/halberd-js/issues/1)
 
@@ -18,18 +20,17 @@ More
 
 [现代WEB前端开发的基石 (Cornerstone of Modern Front-End Web Development)](https://github.com/yangjc/halberd-js/issues/6)
 
-For
----
+#### For
+
 Chrome 3+ ; Firefox 2+ ; Safari 3.2+ ; Opera 10+ ; IE 6+ .
 
-License
--------
+#### License
 
 Halberd-JS is available under the terms of the MIT License.
 
 ___
 
-### Todo
+#### Todo
 
 * Publishing tools (merge && minify)
 * Events support for plugins
